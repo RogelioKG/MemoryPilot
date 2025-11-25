@@ -1,0 +1,46 @@
+services:
+  db:
+    image: pgvector/pgvector:pg18
+    environment:
+      POSTGRES_USER: $POSTGRES_USER
+      POSTGRES_PASSWORD: $POSTGRES_PASSWORD
+      POSTGRES_DB: $POSTGRES_DB
+    ports:
+      - "5432:$POSTGRES_PORT"
+    volumes:
+      - pgdata:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $POSTGRES_USER -d $POSTGRES_DB"]
+      interval: 2s
+      timeout: 5s
+      retries: 3
+
+  backend:
+    build:
+      context: ./backend
+    env_file:
+      - ./backend/.env
+    environment:
+      POSTGRES_URI: $POSTGRES_URI
+      VECTOR_TABLE_NAME: $VECTOR_TABLE_NAME
+      BACKEND_PORT: $BACKEND_PORT
+    ports:
+      - "8000:$BACKEND_PORT"
+    depends_on:
+      db:
+        condition: service_healthy
+    command: ["python", "./main.py"]
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        VITE_BACKEND_API_BASE_URL: $VITE_BACKEND_API_BASE_URL
+    ports:
+      - "4173:80"
+    depends_on:
+      - backend
+    command: ["nginx", "-g", "daemon off;"]
+
+volumes:
+  pgdata:
