@@ -27,10 +27,12 @@ class DocumentService:
             self._handlers[mime_pattern] = handler
 
     async def load_documents(self, files: list[UploadFile]) -> list[Document]:
-        blobs = await asyncio.gather(*(self.file_to_blob(f) for f in files))
-
         docs: list[Document] = []
-        for blob in blobs:
+
+        tasks = [asyncio.create_task(self.file_to_blob(f)) for f in files]
+
+        for coro in asyncio.as_completed(tasks):
+            blob = await coro
             docs.extend(self.blob_to_documents(blob))
 
         return docs
