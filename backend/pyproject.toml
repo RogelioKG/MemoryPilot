@@ -8,6 +8,7 @@ dependencies = [
     "langchain>=1.1.0",
     "langchain-openai>=1.1.0",
     "langchain-postgres>=0.0.16",
+    "pydantic-settings>=2.12.0",
     "pypdf>=6.4.0",
     "python-dotenv>=1.2.1",
     "python-multipart>=0.0.20",

@@ -1,23 +1,38 @@
 from collections.abc import AsyncGenerator
+from dataclasses import dataclass
 from functools import lru_cache
 from typing import Any, cast
 
 from fastapi import UploadFile
-from langchain.agents import create_agent
-from langchain.agents.middleware import SummarizationMiddleware
+from langchain.agents import AgentState, create_agent
+from langchain.agents.middleware import AgentMiddleware, SummarizationMiddleware
+from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage, BaseMessageChunk, HumanMessage, ToolMessage
 from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.checkpoint.memory import InMemorySaver
 
-from .config import get_config
-from .database.vector import get_vector_db
-from .services.document import get_document_service
-from .utils.tools import query_weather, save_memory, search_memory
-from .utils.types import ChatContext, ChatMiddleware, ChatState
+from ..database.base import VectorDatabase
+from ..database.vectordb import get_vector_db
+from ..model.llm import get_llm_model
+from ..services.document import DocumentService, get_document_service
+from .tools import query_weather, save_memory, search_memory
+
+
+@dataclass
+class ChatContext:
+    vector_db: VectorDatabase
+    document_service: DocumentService
+    files: list[UploadFile] | None
+
+
+class ChatState(AgentState): ...
+
+
+class ChatMiddleware(AgentMiddleware[ChatState, ChatContext]): ...
 
 
 class ChatAgent:
-    def __init__(self, *, model: str, checkpointer: BaseCheckpointSaver):
+    def __init__(self, *, model: BaseChatModel, checkpointer: BaseCheckpointSaver):
         self.model = model
         self.checkpointer = checkpointer
         self.agent = self._create_agent()
@@ -30,12 +45,16 @@ class ChatAgent:
         ]
 
         system_prompt = """
-        你是一個會使用工具的助理。依照以下原則決定是否呼叫工具：
+        你是一個會使用工具的助理。
+        當使用者的需求可以透過工具解決時，**必須**呼叫工具，禁止自行編造數據。
+        依照以下原則決定是否呼叫工具：
 
-        【工具使用規則】
-        - save_memory：使用者「提供檔案」，並要求「記住 / 儲存 / 加到知識庫」。
-        - search_memory：當使用者「提出問題」，並要求「從知識庫找」相關訊息。
-        - query_weather
+        【工具】
+        - save_memory：使用者「提供檔案/內容」，並要求「記住/儲存/加到知識庫」時使用。
+        - search_memory：使用者詢問「自己之前提供的資料」、「我的檔案」或提到「查詢知識庫/記憶」時使用。
+        - query_weather：詢問天氣狀況時使用。
+            - 例如：當使用者問「現在天氣」時 -> location="Taipei", current=["temperature_2m"]
+            - 例如：當使用者問「未來天氣」-> location="Taipei", daily=["temperature_2m_max"], forecast_days=3
         - 其他情況：直接回答，不使用工具。
 
         【範例】
@@ -53,7 +72,7 @@ class ChatAgent:
         → 一般聊天，不用工具
 
         請依上述規則推理，不要誤用工具。
-        請使用純文字回覆，不要採用 Markdown 格式，可以使用 Emoji。
+        請勿採用 Markdown 格式回覆，但可以使用 Emoji。
         """
 
         return create_agent(
@@ -73,6 +92,26 @@ class ChatAgent:
             ],
         )
 
+    def _extract_text_from_content(self, content: Any) -> str:
+        if content is None:
+            return ""
+
+        if isinstance(content, str):
+            return content
+
+        if isinstance(content, list):
+            text_parts = []
+            for part in content:
+                text_parts.append(self._extract_text_from_content(part))
+            return "".join(text_parts)
+
+        if isinstance(content, dict):
+            if content.get("type") == "text":
+                return content.get("text", "")
+            return ""
+
+        return str(content)
+
     async def ainvoke(
         self,
         query: str,
@@ -89,9 +128,8 @@ class ChatAgent:
                 files=files,
             ),
         )
-
         message: AIMessage = results["messages"][-1]
-        return message.content  # type: ignore
+        return self._extract_text_from_content(message.content)
 
     async def astream(
         self,
@@ -114,7 +152,7 @@ class ChatAgent:
         async for chunk in stream:
             message, metadata = cast(tuple[BaseMessageChunk | ToolMessage, dict[str, Any]], chunk)
             if metadata["langgraph_node"] == "model":
-                yield message.content  # type: ignore
+                yield self._extract_text_from_content(message.content)
             elif metadata["langgraph_node"] == "tools":
                 yield ""
             else:
@@ -124,6 +162,6 @@ class ChatAgent:
 @lru_cache
 def get_chat_agent():
     return ChatAgent(
-        model=get_config().CHAT_MODEL,
+        model=get_llm_model(),
         checkpointer=InMemorySaver(),
     )

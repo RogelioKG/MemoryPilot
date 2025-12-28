@@ -1,5 +1,5 @@
 export const API_BASE = {
-  backend: import.meta.env.VITE_BACKEND_API_BASE_URL,
+  backend: import.meta.env.VITE_BACKEND_BASE_URL,
   dicebear: 'https://api.dicebear.com/7.x',
 } as const
 

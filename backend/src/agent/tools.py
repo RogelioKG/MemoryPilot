@@ -1,12 +1,44 @@
+import logging
 from typing import Any
 
 import requests
 from langchain.tools import ToolRuntime, tool
 from langchain_core.messages import ToolMessage
 from langgraph.types import Command
+from pydantic import BaseModel, Field
 
-from .misc import geocode
-from .types import ChatContext, ChatState, WeatherQueryInput
+from ..utils.misc import geocode
+from .types import ChatContext, ChatState
+
+
+class WeatherQueryInput(BaseModel):
+    """氣象查詢輸入格式"""
+
+    location: str = Field(
+        description="地點、城市之英文名稱",
+    )
+    current: list[str] | None = Field(
+        default=None,
+        description="欲查詢天氣參數（即時）"
+        "例如：apparent_temperature、temperature_2m、relative_humidity_2m、"
+        "wind_speed_10m、precipitation、rain、snowfall 等等",
+    )
+    hourly: list[str] | None = Field(
+        default=None,
+        description="欲查詢天氣參數（逐小時預報）"
+        "例如：temperature_2m、relative_humidity_2m、wind_speed_10m、rain、visibility 等等",
+    )
+    daily: list[str] | None = Field(
+        default=None,
+        description="欲查詢天氣參數（逐日預報）"
+        "例如：temperature_2m_max、temperature_2m_min、precipitation_sum、rain、uv_index_max 等等",
+    )
+    forecast_days: int = Field(
+        default=1,
+        ge=1,
+        le=7,
+        description="預報天數（mode 為 hourly 或 daily 時使用）",
+    )
 
 
 @tool
@@ -14,6 +46,8 @@ async def save_memory(
     runtime: ToolRuntime[ChatContext, ChatState],
 ) -> Command:
     """將文件內容存進向量資料庫"""
+    logging.info("Tool [save_memory]: triggered")
+
     tool_call_id = runtime.tool_call_id
     document_service = runtime.context.document_service
     vector_db = runtime.context.vector_db
@@ -41,6 +75,8 @@ async def search_memory(
     query: str,
 ) -> Command:
     """從向量資料庫做 RAG 查詢"""
+    logging.info("Tool [search_memory]: triggered")
+
     tool_call_id = runtime.tool_call_id
     vector_db = runtime.context.vector_db
     results = await vector_db.store.asimilarity_search(query, k=4)
@@ -64,6 +100,8 @@ def query_weather(
     forecast_days: int = 1,
 ) -> Command:
     """查詢即時或預報天氣（使用 Open-Meteo API）"""
+    logging.info("Tool [query_weather]: triggered")
+    logging.info(f"Tool [query_weather]: {location=}")
 
     tool_call_id = runtime.tool_call_id
 
@@ -80,6 +118,7 @@ def query_weather(
         "daily": daily,
         "forecast_days": forecast_days,
     }
+    logging.info(f"Tool [query_weather]: {params=}")
 
     try:
         response = requests.get(
@@ -92,5 +131,7 @@ def query_weather(
         new_state: ChatState = {"messages": [ToolMessage(f"Fail: 天氣 API 呼叫失敗：{err}", tool_call_id=tool_call_id)]}
         return Command(update=new_state)
     else:
-        new_state: ChatState = {"messages": [ToolMessage(f"Success: {response.json()}", tool_call_id=tool_call_id)]}
+        result = response.json()
+        new_state: ChatState = {"messages": [ToolMessage(f"Success: {result}", tool_call_id=tool_call_id)]}
+        logging.info(f"Tool [query_weather]: {result=}")
         return Command(update=new_state)

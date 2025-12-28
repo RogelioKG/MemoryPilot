@@ -24,6 +24,13 @@ async function handleUserMessage(payload: { message: string, files?: File[] }) {
       sys.text += chunk
     },
   )
+
+  // const sys = convStore.currentConversation.messages.find(message => message.id === systemMessage.id)!
+  // sys.text = await chatAPI.chat(
+  //   convStore.currentConversation.id,
+  //   message,
+  //   files,
+  // )
 }
 </script>
 

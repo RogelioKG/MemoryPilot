@@ -1,3 +1,4 @@
+import logging
 from typing import Any
 
 import requests
@@ -11,7 +12,7 @@ def geocode(location: str) -> dict[str, Any] | None:
             params={"name": location, "count": 1},
             timeout=5,
         )
-        print("Geocode URL:", response.url)
+        logging.info(f"Geocode request: {response.url}")
         data: dict = response.json()
         if not data.get("results"):
             return None
