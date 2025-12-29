@@ -1,6 +1,5 @@
-from __future__ import annotations
-
 from abc import ABC, abstractmethod
+from functools import cached_property
 
 from langchain_core.embeddings import Embeddings
 from langchain_core.vectorstores import VectorStore
@@ -21,14 +20,15 @@ class VectorDatabase(ABC):
     @property
     def store(self) -> VectorStore:
         if self._store is None:
-            raise RuntimeError("Vector Database not initialized. Call init() first.")
+            raise RuntimeError("Vector Database not initialized. Call init_store() first.")
         return self._store
 
-    def init(self) -> None:
-        if self._store is not None:
-            return
-
-        self._store = self._init_vector_store()
+    @cached_property
+    def vector_size(self) -> int:
+        return len(self.embedding_model.embed_query("test"))
 
     @abstractmethod
-    def _init_vector_store(self) -> VectorStore: ...
+    def init_store(self) -> None: ...
+
+    @abstractmethod
+    def destroy_store(self) -> None: ...

@@ -4,9 +4,12 @@ from typing import Any
 import requests
 from langchain.tools import ToolRuntime, tool
 from langchain_core.messages import ToolMessage
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langgraph.types import Command
 from pydantic import BaseModel, Field
 
+from ..database.vectordb import get_vector_db
+from ..services.document import get_document_service
 from ..utils.misc import geocode
 from .types import ChatContext, ChatState
 
@@ -49,14 +52,22 @@ async def save_memory(
     logging.info("Tool [save_memory]: triggered")
 
     tool_call_id = runtime.tool_call_id
-    document_service = runtime.context.document_service
-    vector_db = runtime.context.vector_db
     files = runtime.context.files
+    vector_db = get_vector_db()
+    document_service = get_document_service()
+    text_splitter = RecursiveCharacterTextSplitter(
+        chunk_size=200,
+        chunk_overlap=20,
+        add_start_index=True,
+    )
 
     try:
         assert files is not None
         docs = await document_service.load_documents(files)
-        await vector_db.store.aadd_documents(docs)
+        logging.info(f"Tool [save_memory]: total {len(docs)} docs")
+        splits = text_splitter.split_documents(docs)
+        logging.info(f"Tool [save_memory]: created {len(splits)} splits")
+        await vector_db.store.aadd_documents(splits)
     except Exception:
         new_state: ChatState = {
             "messages": [ToolMessage("Fail: 使用者沒有傳入檔案", tool_call_id=tool_call_id)],
@@ -78,7 +89,8 @@ async def search_memory(
     logging.info("Tool [search_memory]: triggered")
 
     tool_call_id = runtime.tool_call_id
-    vector_db = runtime.context.vector_db
+    vector_db = get_vector_db()
+
     results = await vector_db.store.asimilarity_search(query, k=4)
 
     if not results:

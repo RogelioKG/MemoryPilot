@@ -1,34 +1,18 @@
 from collections.abc import AsyncGenerator
-from dataclasses import dataclass
 from functools import lru_cache
 from typing import Any, cast
 
 from fastapi import UploadFile
-from langchain.agents import AgentState, create_agent
-from langchain.agents.middleware import AgentMiddleware, SummarizationMiddleware
+from langchain.agents import create_agent
+from langchain.agents.middleware import SummarizationMiddleware
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage, BaseMessageChunk, HumanMessage, ToolMessage
 from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.checkpoint.memory import InMemorySaver
 
-from ..database.base import VectorDatabase
-from ..database.vectordb import get_vector_db
 from ..model.llm import get_llm_model
-from ..services.document import DocumentService, get_document_service
 from .tools import query_weather, save_memory, search_memory
-
-
-@dataclass
-class ChatContext:
-    vector_db: VectorDatabase
-    document_service: DocumentService
-    files: list[UploadFile] | None
-
-
-class ChatState(AgentState): ...
-
-
-class ChatMiddleware(AgentMiddleware[ChatState, ChatContext]): ...
+from .types import ChatContext, ChatMiddleware, ChatState
 
 
 class ChatAgent:
@@ -122,11 +106,7 @@ class ChatAgent:
         results = await self.agent.ainvoke(
             {"messages": [HumanMessage(query)]},
             {"configurable": {"thread_id": thread_id}},
-            context=ChatContext(
-                vector_db=get_vector_db(),
-                document_service=get_document_service(),
-                files=files,
-            ),
+            context=ChatContext(files=files),
         )
         message: AIMessage = results["messages"][-1]
         return self._extract_text_from_content(message.content)
@@ -141,11 +121,7 @@ class ChatAgent:
         stream = self.agent.astream(
             {"messages": [HumanMessage(query)]},
             {"configurable": {"thread_id": thread_id}},
-            context=ChatContext(
-                vector_db=get_vector_db(),
-                document_service=get_document_service(),
-                files=files,
-            ),
+            context=ChatContext(files=files),
             stream_mode="messages",
         )
 

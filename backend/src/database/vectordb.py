@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from functools import lru_cache
+from functools import cached_property, lru_cache
 from typing import TYPE_CHECKING
 
 from ..config import get_config
@@ -8,65 +8,77 @@ from ..model.embedding import get_embedding_model
 from .base import VectorDatabase
 
 if TYPE_CHECKING:
-    from langchain_postgres import PGVectorStore  # pyright: ignore[reportMissingImports]
-    from langchain_qdrant import QdrantVectorStore  # pyright: ignore[reportMissingImports]
+    from langchain_postgres import PGEngine  # pyright: ignore[reportMissingImports]
+    from qdrant_client import QdrantClient  # pyright: ignore[reportMissingImports]
 
 
 class PGVectorDatabase(VectorDatabase):
-    def _init_vector_store(self) -> PGVectorStore:
-        # lazy import
-        from langchain_postgres import PGEngine, PGVectorStore  # pyright: ignore[reportMissingImports]
+    @cached_property
+    def engine(self) -> PGEngine:
+        from langchain_postgres import PGEngine  # pyright: ignore[reportMissingImports]
 
-        # vector size
-        vector_size = len(self.embedding_model.embed_query("test"))
+        return PGEngine.from_connection_string(url=self.db_url)
 
-        # engine
-        engine = PGEngine.from_connection_string(url=self.db_url)
+    def init_store(self) -> None:
+        from langchain_postgres import PGVectorStore  # pyright: ignore[reportMissingImports]
 
         # create collection
         try:
-            engine.init_vectorstore_table(
+            self.engine.init_vectorstore_table(
                 table_name=self.collection_name,
-                vector_size=vector_size,
+                vector_size=self.vector_size,
             )
         except Exception:
             pass
 
-        # vector store
-        return PGVectorStore.create_sync(
-            engine=engine,
+        # create store
+        self._store = PGVectorStore.create_sync(
+            engine=self.engine,
             table_name=self.collection_name,
             embedding_service=self.embedding_model,
         )
 
+    def destroy_store(self) -> None:
+        # delete collection
+        self.engine.drop_table(self.collection_name)
+
+        # delete store
+        self._store = None
+
 
 class QdrantDatabase(VectorDatabase):
-    def _init_vector_store(self) -> QdrantVectorStore:
-        # lazy import
-        from langchain_qdrant import QdrantVectorStore  # pyright: ignore[reportMissingImports]
-        from qdrant_client import QdrantClient, models  # pyright: ignore[reportMissingImports]
-        from qdrant_client.http.exceptions import UnexpectedResponse  # pyright: ignore[reportMissingImports]
+    @cached_property
+    def client(self) -> QdrantClient:
+        from qdrant_client import QdrantClient  # pyright: ignore[reportMissingImports]
 
-        # client
-        client = QdrantClient(url=self.db_url)
+        return QdrantClient(url=self.db_url)
+
+    def init_store(self) -> None:
+        from langchain_qdrant import QdrantVectorStore  # pyright: ignore[reportMissingImports]
+        from qdrant_client import models  # pyright: ignore[reportMissingImports]
 
         # create collection
         try:
-            client.get_collection(self.collection_name)
-        except (UnexpectedResponse, ValueError):
-            vector_size = len(self.embedding_model.embed_query("test"))
-
-            client.create_collection(
+            self.client.create_collection(
                 collection_name=self.collection_name,
-                vectors_config=models.VectorParams(size=vector_size, distance=models.Distance.COSINE),
+                vectors_config=models.VectorParams(size=self.vector_size, distance=models.Distance.COSINE),
             )
+        except Exception:
+            pass
 
-        # vector store
-        return QdrantVectorStore(
-            client=client,
+        # create store
+        self._store = QdrantVectorStore(
+            client=self.client,
             collection_name=self.collection_name,
             embedding=self.embedding_model,
         )
+
+    def destroy_store(self) -> None:
+        # delete collection
+        self.client.delete_collection(self.collection_name)
+
+        # delete store
+        self._store = None
 
 
 @lru_cache
@@ -92,6 +104,6 @@ def get_vector_db() -> VectorDatabase:
     else:
         raise ValueError(f"Unsupported vector database provider: {db_provider}")
 
-    vector_db.init()
+    vector_db.init_store()
 
     return vector_db

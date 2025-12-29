@@ -1,6 +1,60 @@
 services:
+
+  db:
+    profiles: ["local-llm", "remote-llm", "local-test", "remote-test"]
+    image: pgvector/pgvector:pg18
+    environment:
+      POSTGRES_USER: $POSTGRES_USER
+      POSTGRES_PASSWORD: $POSTGRES_PASSWORD
+      POSTGRES_DB: $POSTGRES_DB
+    ports:
+      - "5432:$POSTGRES_PORT"
+    volumes:
+      - pgdata:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $POSTGRES_USER -d $POSTGRES_DB"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  frontend:
+    profiles: ["local-llm", "remote-llm"]
+    build:
+      context: ./frontend
+      args:
+        VITE_BACKEND_BASE_URL: $BACKEND_BASE_URL
+    ports:
+      - "4173:80"
+    command: ["nginx", "-g", "daemon off;"]
+
+  backend:
+    profiles: ["local-llm", "remote-llm"]
+    build:
+      context: ./backend
+      target: production
+    environment:
+      BACKEND_PORT: $BACKEND_PORT
+      VECTOR_DB_URL: $VECTOR_DB_URL
+      VECTOR_DB_PROVIDER: $VECTOR_DB_PROVIDER
+      VECTOR_DB_COLLECTION: $VECTOR_DB_COLLECTION
+      EMBEDDING_PROVIDER: $EMBEDDING_PROVIDER
+      EMBEDDING_MODEL: $EMBEDDING_MODEL
+      LLM_PROVIDER: $LLM_PROVIDER
+      LLM_MODEL: $LLM_MODEL
+      OPENAI_API_KEY: $OPENAI_API_KEY
+      GOOGLE_API_KEY: $GOOGLE_API_KEY
+      ANTHROPIC_API_KEY: $ANTHROPIC_API_KEY
+      GROK_API_KEY: $GROK_API_KEY
+      OLLAMA_BASE_URL: $OLLAMA_BASE_URL
+    ports:
+      - "8000:$BACKEND_PORT"
+    depends_on:
+      db:
+        condition: service_healthy
+    command: ["python", "./main.py"]
+
   ollama:
-    profiles: ["local-llm"]
+    profiles: ["local-llm", "local-test"]
     image: ollama/ollama:latest
     ports:
       - "11434:$OLLAMA_PORT"
@@ -19,25 +73,11 @@ services:
       timeout: 3s
       retries: 5
 
-  db:
-    image: pgvector/pgvector:pg18
-    environment:
-      POSTGRES_USER: $POSTGRES_USER
-      POSTGRES_PASSWORD: $POSTGRES_PASSWORD
-      POSTGRES_DB: $POSTGRES_DB
-    ports:
-      - "5432:$POSTGRES_PORT"
-    volumes:
-      - pgdata:/var/lib/postgresql
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U $POSTGRES_USER -d $POSTGRES_DB"]
-      interval: 5s
-      timeout: 3s
-      retries: 5
-
-  backend:
+  evaluator:
+    profiles: ["local-test", "remote-test"]
     build:
       context: ./backend
+      target: test
     environment:
       BACKEND_PORT: $BACKEND_PORT
       VECTOR_DB_URL: $VECTOR_DB_URL
@@ -48,22 +88,16 @@ services:
       LLM_PROVIDER: $LLM_PROVIDER
       LLM_MODEL: $LLM_MODEL
       OPENAI_API_KEY: $OPENAI_API_KEY
+      GOOGLE_API_KEY: $GOOGLE_API_KEY
+      ANTHROPIC_API_KEY: $ANTHROPIC_API_KEY
+      GROK_API_KEY: $GROK_API_KEY
       OLLAMA_BASE_URL: $OLLAMA_BASE_URL
-    ports:
-      - "8000:$BACKEND_PORT"
+    volumes:
+      - ./backend/reports:/app/reports
     depends_on:
       db:
         condition: service_healthy
-    command: ["python", "./main.py"]
-
-  frontend:
-    build:
-      context: ./frontend
-      args:
-        VITE_BACKEND_BASE_URL: $BACKEND_BASE_URL
-    ports:
-      - "4173:80"
-    command: ["nginx", "-g", "daemon off;"]
+    command: ["pytest", "tests", "-v"]
 
 volumes:
   pgdata:
