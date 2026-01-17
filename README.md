@@ -1,4 +1,6 @@
 # MemoryPilot
+![Version: 1.0.0](https://img.shields.io/badge/version-1.0.0-blue)
+[![Licence: AGPL-3.0](https://img.shields.io/github/license/RogelioKG/MemoryPilot?style=flat)](./LICENSE)
 
 ## ⚡ Brief
 
