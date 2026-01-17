@@ -4,7 +4,6 @@ from contextlib import asynccontextmanager
 from typing import Annotated
 
 import uvicorn
-from dotenv import load_dotenv
 from fastapi import Depends, FastAPI, Form, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
@@ -19,9 +18,6 @@ from src.utils.logger import setup_logging
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    load_dotenv()  # 載入環境變數
-    if sys.platform == "win32":  # 兼容 Windows
-        asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
     setup_logging()  # 初始化日誌
     get_vector_db()  # 初始化資料庫
     get_chat_agent()  # 初始化模型
@@ -65,4 +61,8 @@ async def chat_stream(
 
 
 if __name__ == "__main__":
+    # 兼容 Windows
+    if sys.platform == "win32":
+        asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+
     uvicorn.run("main:app", host="0.0.0.0", port=get_config().BACKEND_PORT)
