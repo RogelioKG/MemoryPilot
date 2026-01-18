@@ -7,7 +7,7 @@ from langchain.agents.middleware import AgentMiddleware
 
 @dataclass
 class ChatContext:
-    files: list[UploadFile] | None
+    document_files: list[UploadFile] | None
 
 
 class ChatState(AgentState): ...

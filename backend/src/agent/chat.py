@@ -1,3 +1,4 @@
+import base64
 from collections.abc import AsyncGenerator
 from functools import lru_cache
 from typing import Any, cast
@@ -77,6 +78,7 @@ class ChatAgent:
         )
 
     def _extract_text_from_content(self, content: Any) -> str:
+        # 從 Agent 回傳的訊息中，提取純文字字串
         if content is None:
             return ""
 
@@ -96,6 +98,47 @@ class ChatAgent:
 
         return str(content)
 
+    def _categorize_files(self, files: list[UploadFile] | None) -> tuple[list[UploadFile], list[UploadFile]]:
+        # 將上傳的檔案，分類為圖片檔案與非圖片檔案
+        if not files:
+            return [], []
+
+        image_files: list[UploadFile] = []
+        document_files: list[UploadFile] = []
+
+        for file in files:
+            if file.content_type and file.content_type.startswith("image/"):
+                image_files.append(file)
+            else:
+                document_files.append(file)
+
+        return image_files, document_files
+
+    async def _prepare_message_content(
+        self, query: str, files: list[UploadFile] | None
+    ) -> str | list[str | dict[str, Any]]:
+        if not files:
+            return query
+
+        content: list[str | dict[str, Any]] = [{"type": "text", "text": query}]
+
+        for file in files:
+            if file.content_type and file.content_type.startswith("image/"):
+                image_data = await file.read()
+                await file.seek(0)
+                base64_image = base64.b64encode(image_data).decode("utf-8")
+                content.append(
+                    {
+                        "type": "image_url",
+                        "image_url": {"url": f"data:{file.content_type};base64,{base64_image}"},
+                    }
+                )
+
+        if len(content) == 1:
+            return query
+
+        return content
+
     async def ainvoke(
         self,
         query: str,
@@ -103,10 +146,12 @@ class ChatAgent:
         *,
         thread_id: str,
     ) -> str:
+        image_files, document_files = self._categorize_files(files)
+        message_content = await self._prepare_message_content(query, image_files)
         results = await self.agent.ainvoke(
-            {"messages": [HumanMessage(query)]},
+            {"messages": [HumanMessage(message_content)]},
             {"configurable": {"thread_id": thread_id}},
-            context=ChatContext(files=files),
+            context=ChatContext(document_files=document_files),
         )
         message: AIMessage = results["messages"][-1]
         return self._extract_text_from_content(message.content)
@@ -118,10 +163,12 @@ class ChatAgent:
         *,
         thread_id: str,
     ) -> AsyncGenerator[str]:
+        image_files, document_files = self._categorize_files(files)
+        message_content = await self._prepare_message_content(query, image_files)
         stream = self.agent.astream(
-            {"messages": [HumanMessage(query)]},
+            {"messages": [HumanMessage(message_content)]},
             {"configurable": {"thread_id": thread_id}},
-            context=ChatContext(files=files),
+            context=ChatContext(document_files=document_files),
             stream_mode="messages",
         )
 

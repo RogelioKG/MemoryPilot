@@ -52,7 +52,7 @@ async def save_memory(
     logging.info("Tool [save_memory]: triggered")
 
     tool_call_id = runtime.tool_call_id
-    files = runtime.context.files
+    files = runtime.context.document_files
     vector_db = get_vector_db()
     document_service = get_document_service()
     text_splitter = RecursiveCharacterTextSplitter(
